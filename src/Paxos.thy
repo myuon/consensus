@@ -1,81 +1,72 @@
 theory Paxos
-imports Main
+imports Main LTL
 begin
 
-datatype Request = Propose int | Prepare int | Promise int int int | Accept int int | Learn int int
+(* ============== Paxos ============== *)
 
-datatype ProposerID = ProposerID "nat"
-datatype AcceptorID = AcceptorID "nat"
-datatype LearnerID = LearnerID "nat"
-
-datatype Response = Nothing | SendAcceptors Request | SendBackProposer Request | SendLearners Request
-
-datatype Node = NProposer ProposerID | NAcceptor AcceptorID | NLearner LearnerID
-
-record Proposer =
-  crnd :: "int"
-  cval :: int
-  P :: "(int \<times> int) set"
-  pickNextRound :: "int \<Rightarrow> int"
-  acceptors :: "AcceptorID set"
-  n :: "nat"
-  f :: "nat"
-
-fun newProposer :: "AcceptorID set \<Rightarrow> Proposer" where
-  "newProposer acc = \<lparr>
-    crnd = -1,
-    cval = 0,
-    P = {},
-    pickNextRound = \<lambda>x. x+1,
-    acceptors = acc,
-    n = card acc,
-    f = ((card acc - 1) mod 2)
-  \<rparr>"
-
-fun updateProposer :: "Request => Proposer => Proposer \<times> Response" where
-  "updateProposer (Propose val) p = (let next_crnd = pickNextRound p (crnd p) in (p \<lparr> crnd := next_crnd \<rparr>, SendAcceptors (Prepare next_crnd)))"
-| "updateProposer (Promise rnd vrnd vval) p = (if rnd = crnd p then p \<lparr> P := P p \<union> {(vrnd, vval)} \<rparr> else p, Nothing)"
-| "updateProposer _ _ = undefined"
-
-fun checkProposer :: "(int set \<Rightarrow> int) \<Rightarrow> Proposer \<Rightarrow> Proposer \<times> Response" where
-  "checkProposer pick p = (if card (P p) \<ge> n p - f p
-    then
-      let j = Max (fst ` {x. x \<in> P p}) in
-      if j \<ge> 0
-        then (p \<lparr> cval := pick {vval. (j,vval) \<in> P p} \<rparr>, SendAcceptors (Accept (crnd p) (cval p)))
-        else (p, Nothing)
-    else (p, Nothing)
-  )"
+record 'v Proposer =
+  crnd :: nat
+  cval :: 'v
+  pairs :: "(nat\<times>nat) set"
 
 record Acceptor =
-  rnd :: int
-  vrnd :: int
-  vval :: int
-
-fun updateAcceptor :: "Request \<Rightarrow> Acceptor \<Rightarrow> Acceptor \<times> Response" where
-  "updateAcceptor (Prepare prnd) p = (if prnd > rnd p
-    then (p \<lparr> rnd := prnd \<rparr>, SendBackProposer (Promise prnd (vrnd p) (vval p)))
-    else (p, Nothing)
-  )"
-| "updateAcceptor (Accept i v) p = (if i \<ge> rnd p
-    then (p \<lparr> rnd := i, vrnd := i, vval := v \<rparr>, SendLearners (Learn i v))
-    else (p, Nothing)
-  )"
-| "updateAcceptor _ _ = undefined"
+  rnd :: nat
+  vrnd :: nat
+  vval :: nat
 
 record Learner =
-  V :: "(int \<times> int) set"
+  learned :: "(nat\<times>nat) set"
 
-fun updateLearner :: "Request \<Rightarrow> Learner \<Rightarrow> Learner" where
-  "updateLearner (Learn i v) p = p \<lparr> V := V p \<union> {(i,v)} \<rparr>"
-| "updateLearner _ _ = undefined"
+record 'v ProposeM =
+  val :: 'v
 
-fun isChosen :: "nat \<Rightarrow> nat \<Rightarrow> Learner \<Rightarrow> bool" where
-  "isChosen n' f' p = (card (V p) \<ge> n' - f')"
+record PrepareM =
+  prnd :: nat
 
-record Paxos =
-  proposers :: "ProposerID set"
-  acceptors :: "AcceptorID set"
-  learners :: "LearnerID set"
+record PromiseM =
+  rnd :: nat
+  vrnd :: nat
+  vval :: nat
+
+record AcceptM =
+  index :: nat
+  aval :: nat
+
+record LearnM =
+  index :: nat
+  chosen :: nat
+
+datatype 'v Message
+  = Propose "'v ProposeM"
+  | Prepare PrepareM
+  | Promise PromiseM
+  | Accept AcceptM
+  | Learn LearnM
+
+fun isPropose where
+  "isPropose (Propose _) = True"
+| "isPropose _ = False"
+
+record 'v Paxos =
+  messages :: "('v Message) set"
+  proposer :: "'v Proposer"
+  acceptors :: "Acceptor list"
+  learner :: "Learner"
+
+locale Paxos =
+  fixes P :: "('v,'p) Paxos_scheme" (structure)
+  (* crash failure *)
+  and cf :: nat
+  (* pick function *)
+  and pickNextRound :: "nat \<Rightarrow> nat"
+  and V :: "'v set"
+
+  assumes enough_acceptors: "size (acceptors P) \<ge> 2 * cf + 1"
+  and init: "\<Turnstile> Latom (card (messages P) = 0)"
+  and prepare: "\<Turnstile> Latom ({m. m \<in> messages P \<and> isPropose m} \<noteq> {})"
+  and phase1a: "\<exists>propose. \<Turnstile> \<circle> Latom (Propose propose \<in> messages P)
+     \<longrightarrow> (let crnd_next = pickNextRound (crnd (proposer P)) in 
+     \<Turnstile> Latom (Prepare (PrepareM \<lparr> prnd = crnd_next \<rparr>) \<in> messages P)
+     \<and> \<Turnstile> Latom (proposer P = \<lparr> crnd = crnd_next, cval = val propose, pairs = {} \<rparr>))"
 
 end
