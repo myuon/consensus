@@ -42,6 +42,10 @@ primrec kripke_semantics :: "(nat \<Rightarrow> 'a set) \<Rightarrow> 'a LTL \<R
 | "w \<Turnstile> \<circle> p = shift w 1 \<Turnstile> p"
 | "w \<Turnstile> p \<union>t q = (\<exists>i \<ge> 0. shift w i \<Turnstile> q \<and> (\<forall>k. 0 \<le> k \<and> k < i \<longrightarrow> shift w k \<Turnstile> p))"
 
+lemma and_sem: "w \<Turnstile> p \<and>t q = (w \<Turnstile> p \<and> w \<Turnstile> q)"
+  unfolding Land_def
+  by simp
+
 definition valid ("\<Turnstile> _" [80] 80) where
   "\<Turnstile> p = (\<forall>w. w \<Turnstile> p)"
 
@@ -50,16 +54,22 @@ lemma notF_iff_G: "\<Turnstile> (\<not>t \<diamond> (\<not>t p)) = \<Turnstile> 
   apply simp
   done
 
+lemma conjunct1_sem: "\<Turnstile> p \<and>t q \<Longrightarrow> \<Turnstile> p"
+  by (simp add: and_sem valid_def)
+
+lemma conjunct2_sem: "\<Turnstile> p \<and>t q \<Longrightarrow> \<Turnstile> q"
+  by (simp add: and_sem valid_def)
+
 (* Examples *)
 
 datatype Color = red | green | yellow
 
 locale traffic =
-  assumes red_to_green: "\<circle> (Latom red) = Latom green"
-  and green_to_yellow: "\<circle> (Latom green) = Latom yellow"
-  and yellow_to_red: "\<circle> (Latom yellow) = Latom red"
+  assumes red_to_green: "\<Turnstile> Latom red \<union>t Latom green"
+  and green_to_yellow: "\<Turnstile> Latom green \<union>t Latom yellow"
+  and yellow_to_red: "\<Turnstile> Latom yellow \<union>t Latom red"
 
-lemma (in traffic) "\<Turnstile> \<circle> (Latom green) \<rightarrow>t \<diamond> (Latom red)"
-  using red_to_green by auto
+lemma (in traffic) "\<Turnstile> \<diamond> Latom green"
+  by (metis Lfinally_def kripke_semantics.simps(2) kripke_semantics.simps(6) red_to_green valid_def)
 
 end
